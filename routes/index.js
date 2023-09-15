@@ -20,7 +20,7 @@ initializePuppeteer();
 
 async function fetchData(url, selector) {
   const page = await browser.newPage();
-  await page.goto(url);
+  await page.goto(url, { timeout: 60000 });
   const value = await page.$eval(selector, (element) => element.textContent);
   await page.close();
   return value;
