@@ -73,6 +73,7 @@ router.get("/", async (req, res, next) => {
     const value = await retryFetchData(
       "#dolar > div > div > div.col-sm-6.col-xs-6.centrado > strong"
     );
+    console.log("Valor dolar obtenido: ", value);
     res.send(value);
   } catch (error) {
     console.error("Error fetching dollar data:", error);
@@ -85,6 +86,7 @@ router.get("/euro", async (req, res, next) => {
     const value = await retryFetchData(
       "#euro > div > div > div.col-sm-6.col-xs-6.centrado > strong"
     );
+    console.log("Valor euro obtenido: ", value);
     res.send(value);
   } catch (error) {
     console.error("Error fetching euro data:", error);
