@@ -2,65 +2,60 @@ var express = require("express");
 var router = express.Router();
 const puppeteer = require("puppeteer");
 
-let browser;
-let page;
-
 const maxRetries = 3;
 const retryDelay = 1000; // Delay in milliseconds
 
-// Initialize Puppeteer, create a single page instance, and block unnecessary resources
-async function initializePuppeteer() {
+// Global browser instance
+let browser;
+
+// Start the browser when the server starts
+async function startBrowser() {
+  if (browser) return; // If the browser is already started, do nothing
+  browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+}
+
+// Call this function at server start
+startBrowser();
+
+// Function to create a new page, navigate to a URL, and fetch data
+async function fetchWithNewPage(url, selector) {
+  if (!browser) {
+    console.log("No browser instance found, starting new browser.");
+    await startBrowser();
+  }
+
+  const page = await browser.newPage();
+
   try {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      executablePath:
-        process.env.NODE_ENV === "production"
-          ? process.env.PUPPETEER_EXECUTABLE_PATH
-          : puppeteer.executablePath(),
-    });
-
-    page = await browser.newPage();
-
-    // Block unnecessary resources
     await page.setRequestInterception(true);
     page.on("request", (request) => {
-      if (
-        ["image", "stylesheet", "font", "media"].includes(
-          request.resourceType()
-        )
-      ) {
+      if (["image", "stylesheet", "font"].includes(request.resourceType())) {
         request.abort();
       } else {
         request.continue();
       }
     });
 
-    await page.goto(process.env.DOLLAR_SOURCE);
-  } catch (error) {
-    console.error("Error initializing Puppeteer:", error);
+    await page.goto(url);
+    await page.waitForSelector(selector);
+    const value = await page.$eval(selector, (el) => el.textContent);
+    return value;
+  } finally {
+    await page.close();
   }
 }
 
-initializePuppeteer();
-
-async function fetchData(selector) {
-  const value = await page.$eval(selector, (element) => element.textContent);
-  return value;
-}
-
-async function retryFetchData(selector) {
+// Reusable function to handle fetching with retries
+async function fetchDataWithRetries(url, selector) {
   for (let i = 0; i < maxRetries; i++) {
     try {
-      if (!page) {
-        console.log("Reinitializing Puppeteer");
-        await initializePuppeteer();
-      }
-      return await fetchData(selector);
+      return await fetchWithNewPage(url, selector);
     } catch (error) {
-      console.error(`Error fetching data (Attempt ${i + 1}):`, error);
+      console.error(`Error on attempt ${i + 1}:`, error);
       if (i < maxRetries - 1) {
-        // If not the last attempt, wait for a while before retrying
         await new Promise((resolve) => setTimeout(resolve, retryDelay));
       }
     }
@@ -68,9 +63,11 @@ async function retryFetchData(selector) {
   throw new Error("Max retries reached");
 }
 
+// Router endpoints using the new fetch function
 router.get("/", async (req, res, next) => {
   try {
-    const value = await retryFetchData(
+    const value = await fetchDataWithRetries(
+      process.env.DOLLAR_SOURCE,
       "#dolar > div > div > div.col-sm-6.col-xs-6.centrado > strong"
     );
     console.log("Valor dolar obtenido: ", value);
@@ -81,16 +78,33 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+router.get("/paralelo", async (req, res, next) => {
+  try {
+    const value = await fetchDataWithRetries(
+      process.env.PARALELO_SOURCE,
+      "body > section > div > div.row.inicio > div.col.texto > h2"
+    );
+    const finalValue = value.replace("BS/USD", "");
+    console.log("Paralelo valor obtenido: ", finalValue);
+    res.send(finalValue);
+  } catch (error) {
+    console.error("Error fetching paralelo data:", error);
+    res.status(500).send("Error fetching paralelo data");
+  }
+});
+
 router.get("/euro", async (req, res, next) => {
   try {
-    const value = await retryFetchData(
+    const value = await fetchDataWithRetries(
+      process.env.EURO_SOURCE,
       "#euro > div > div > div.col-sm-6.col-xs-6.centrado > strong"
     );
     console.log("Valor euro obtenido: ", value);
+
     res.send(value);
   } catch (error) {
     console.error("Error fetching euro data:", error);
-    res.status(500).send("Error fetching data");
+    res.status(500).send("Error fetching euro data");
   }
 });
 
